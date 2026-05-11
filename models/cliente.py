@@ -2,263 +2,172 @@
 models/cliente.py
 Clase Cliente con encapsulación, validaciones y excepciones personalizadas.
 """
-
-import re
 import logging
+import tkinter as tk
+from tkinter import messagebox, ttk
+from abc import ABC, abstractmethod
+from datetime import datetime
 
-from models.base import BaseEntidad
+# =================================================================
+# 1. JERARQUÍA DE EXCEPCIONES PERSONALIZADAS
+# =================================================================
+class SoftwareFJError(Exception):
+    """Raíz de todos los errores del sistema Software FJ."""
+    pass
 
-from exceptions.custom_exceptions import (
-    NombreInvalidoError,
-    EmailInvalidoError,
-    TelefonoInvalidoError,
-    IDClienteInvalidoError,
+class ClienteError(SoftwareFJError):
+    """Raíz de errores relacionados con Cliente."""
+    pass
+
+class NombreInvalidoError(ClienteError): pass
+class EmailInvalidoError(ClienteError): pass
+class TelefonoInvalidoError(ClienteError): pass
+class IDClienteInvalidoError(ClienteError): pass
+
+# =================================================================
+# 2. CONFIGURACIÓN DE LOGS (Manejo de archivos para errores)
+# =================================================================
+logging.basicConfig(
+    filename='registro_eventos.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-logger = logging.getLogger("software_fj")
+# =================================================================
+# 3. ARQUITECTURA ORIENTADA A OBJETOS (Capa de Negocio)
+# =================================================================
 
+class EntidadGeneral(ABC):
+    """Clase abstracta que representa entidades generales del sistema."""
+    def __init__(self, id_entidad):
+        self._id_entidad = id_entidad
+        self._timestamp = datetime.now()
 
-# ── Clase Cliente ───────────────────────────────────────────────────────────
+    @abstractmethod
+    def validar_datos(self):
+        """Obliga a las clases derivadas a implementar validaciones."""
+        pass
 
-class Cliente(BaseEntidad):
-    """
-    Representa a un cliente de Software FJ.
+class Cliente(EntidadGeneral):
+    """Clase Cliente con encapsulación y validaciones estrictas."""
+    def __init__(self, id_cliente, nombre, email, telefono):
+        super().__init__(id_cliente)
+        self.__id = id_cliente
+        self.__nombre = nombre
+        self.__email = email
+        self.__telefono = telefono
+        self.validar_datos() # Validación al instanciar
 
-    Atributos privados (acceso solo por propiedades):
-        __id_cliente : identificador único (3-20 chars alfanuméricos/guiones)
-        __nombre     : nombre completo (solo letras y espacios, 3-80 chars)
-        __email      : correo electrónico con formato válido
-        __telefono   : número de contacto (7-15 dígitos, puede iniciar con '+')
-    """
+    def validar_datos(self):
+        if not self.__id.isdigit():
+            raise IDClienteInvalidoError("El ID debe contener solo números.")
+        if len(self.__nombre) < 3:
+            raise NombreInvalidoError("El nombre es demasiado corto (mín. 3 caracteres).")
+        if "@" not in self.__email:
+            raise EmailInvalidoError("El correo electrónico no tiene un formato válido.")
+        if len(self.__telefono) < 7:
+            raise TelefonoInvalidoError("El teléfono debe tener al menos 7 dígitos.")
 
-    _ids_registrados: set = set()
+    # Getters para la interfaz
+    def obtener_info(self):
+        return (self.__id, self.__nombre, self.__email, self.__telefono)
 
-    _RE_EMAIL = re.compile(
-        r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
-    )
+class GestorClientes:
+    """Manejo de listas internas y lógica de almacenamiento."""
+    def __init__(self):
+        self.__clientes = []
 
-    _RE_TELEFONO = re.compile(
-        r"^\+?[0-9]{7,15}$"
-    )
+    def agregar_cliente(self, id_c, nom, em, tel):
+        try:
+            # Crear objeto cliente (Dispara validaciones internas)
+            nuevo = Cliente(id_c, nom, em, tel)
+            self.__clientes.append(nuevo)
+            logging.info(f"ÉXITO: Cliente {nom} registrado.")
+            return nuevo
+        except ClienteError as e:
+            logging.warning(f"VALIDACIÓN: Fallo al registrar ID {id_c}: {e}")
+            raise # Re-lanzar para la GUI
+        except Exception as e:
+            logging.error(f"CRÍTICO: Error inesperado: {e}")
+            raise SoftwareFJError("Error crítico en el sistema de gestión.") from e
 
-    _RE_ID = re.compile(
-        r"^[A-Za-z0-9_\-]{3,20}$"
-    )
+# =================================================================
+# 4. INTERFAZ GRÁFICA (Capa de Presentación)
+# =================================================================
 
-    _RE_NOMBRE = re.compile(
-        r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$"
-    )
-
-    # ── Constructor ─────────────────────────────────────────────────────────
-
-    def __init__(
-        self,
-        id_cliente: str,
-        nombre: str,
-        email: str,
-        telefono: str
-    ):
+class AppSoftwareFJ(tk.Tk):
+    def __init__(self, gestor):
         super().__init__()
-        self.__id_cliente = self._validar_id(id_cliente)
-        self.__nombre = self._validar_nombre(nombre)
-        self.__email = self._validar_email(email)
-        self.__telefono = self._validar_telefono(telefono)
+        self.gestor = gestor
+        self.title("Software FJ - Gestión de Clientes UNAD")
+        self.geometry("600x500")
+        self._inicializar_gui()
 
-        Cliente._ids_registrados.add(self.__id_cliente)
+    def _inicializar_gui(self):
+        # Título y Formulario
+        tk.Label(self, text="REGISTRO DE CLIENTES", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        container = tk.Frame(self, padx=20)
+        container.pack(fill="x")
 
-        logger.info(
-            "Cliente registrado | ID: %s | Nombre: %s",
-            self.__id_cliente,
-            self.__nombre
-        )
+        labels = ["ID Cliente", "Nombre", "Email", "Teléfono"]
+        self.entries = {}
 
-    # ── Validaciones privadas ───────────────────────────────────────────────
+        for label in labels:
+            row = tk.Frame(container)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, width=15, anchor="w").pack(side="left")
+            ent = tk.Entry(row)
+            ent.pack(side="right", expand=True, fill="x")
+            self.entries[label] = ent
 
-    @classmethod
-    def _validar_id(cls, valor) -> str:
+        # Botón Guardar
+        tk.Button(self, text="REGISTRAR CLIENTE", bg="#28a745", fg="white", 
+                  command=self._ejecutar_accion).pack(pady=15, padx=20, fill="x")
 
-        if not isinstance(valor, str) or not valor.strip():
-            raise IDClienteInvalidoError(
-                "El ID no puede estar vacío."
-            )
+        # Tabla de visualización
+        self.tree = ttk.Treeview(self, columns=("ID", "Nombre", "Email", "Tel"), show="headings")
+        for col in ("ID", "Nombre", "Email", "Tel"):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=100)
+        self.tree.pack(pady=10, padx=20, fill="both", expand=True)
 
-        v = valor.strip()
+    def _ejecutar_accion(self):
+        """Manejo robusto de excepciones en la interfaz."""
+        try:
+            # Captura de datos
+            id_v = self.entries["ID Cliente"].get()
+            nom_v = self.entries["Nombre"].get()
+            em_v = self.entries["Email"].get()
+            tel_v = self.entries["Teléfono"].get()
 
-        if not cls._RE_ID.match(v):
-            raise IDClienteInvalidoError(
-                f"ID '{v}' inválido. "
-                "Use 3-20 caracteres alfanuméricos, "
-                "guiones o guiones bajos."
-            )
+            # Lógica de negocio
+            cliente_creado = self.gestor.agregar_cliente(id_v, nom_v, em_v, tel_v)
+            
+            # Si tiene éxito (Bloque ELSE implícito)
+            self.tree.insert("", "end", values=cliente_creado.obtener_info())
+            self._limpiar_campos()
+            messagebox.showinfo("Éxito", "Cliente registrado correctamente.")
 
-        if v in cls._ids_registrados:
-            raise IDClienteInvalidoError(
-                f"El ID '{v}' ya está registrado."
-            )
+        except ClienteError as e:
+            # Captura excepciones personalizadas
+            messagebox.showerror("Error de Validación", f"Dato inválido: {e}")
+        except SoftwareFJError as e:
+            # Captura errores generales del sistema
+            messagebox.showwarning("Aviso del Sistema", str(e))
+        finally:
+            # Registro en consola para depuración
+            print(f"Intento de registro finalizado a las {datetime.now()}")
 
-        return v
+    def _limpiar_campos(self):
+        for entry in self.entries.values():
+            entry.delete(0, tk.END)
 
-    @classmethod
-    def _validar_nombre(cls, valor) -> str:
-
-        if not isinstance(valor, str) or not valor.strip():
-            raise NombreInvalidoError(
-                "El nombre no puede estar vacío."
-            )
-
-        v = valor.strip()
-
-        if len(v) < 3:
-            raise NombreInvalidoError(
-                f"Nombre '{v}' muy corto "
-                "(mínimo 3 caracteres)."
-            )
-
-        if len(v) > 80:
-            raise NombreInvalidoError(
-                "El nombre excede 80 caracteres."
-            )
-
-        if not cls._RE_NOMBRE.match(v):
-            raise NombreInvalidoError(
-                f"Nombre '{v}' contiene caracteres inválidos. "
-                "Solo letras y espacios."
-            )
-
-        return v
-
-    @classmethod
-    def _validar_email(cls, valor) -> str:
-
-        if not isinstance(valor, str) or not valor.strip():
-            raise EmailInvalidoError(
-                "El correo no puede estar vacío."
-            )
-
-        v = valor.strip().lower()
-
-        if not cls._RE_EMAIL.match(v):
-            raise EmailInvalidoError(
-                f"Correo '{v}' no tiene formato válido."
-            )
-
-        return v
-
-    @classmethod
-    def _validar_telefono(cls, valor) -> str:
-
-        if not isinstance(valor, str) or not valor.strip():
-            raise TelefonoInvalidoError(
-                "El teléfono no puede estar vacío."
-            )
-
-        v = valor.strip()
-
-        if not cls._RE_TELEFONO.match(v):
-            raise TelefonoInvalidoError(
-                f"Teléfono '{v}' inválido. "
-                "Use 7-15 dígitos, puede iniciar con '+'."
-            )
-
-        return v
-
-    # ── Propiedades (solo lectura) ──────────────────────────────────────────
-
-    @property
-    def id_cliente(self):
-        return self.__id_cliente
-
-    @property
-    def nombre(self):
-        return self.__nombre
-
-    @property
-    def email(self):
-        return self.__email
-
-    @property
-    def telefono(self):
-        return self.__telefono
-
-    # ── Setters con validación ──────────────────────────────────────────────
-
-    @nombre.setter
-    def nombre(self, v):
-        self.__nombre = self._validar_nombre(v)
-
-        logger.info(
-            "Nombre actualizado | ID: %s",
-            self.__id_cliente
-        )
-
-    @email.setter
-    def email(self, v):
-        self.__email = self._validar_email(v)
-
-        logger.info(
-            "Email actualizado | ID: %s",
-            self.__id_cliente
-        )
-
-    @telefono.setter
-    def telefono(self, v):
-        self.__telefono = self._validar_telefono(v)
-
-        logger.info(
-            "Teléfono actualizado | ID: %s",
-            self.__id_cliente
-        )
-
-    # ── Métodos abstractos implementados ────────────────────────────────────
-
-    def describir(self) -> str:
-
-        return (
-            f"Cliente[ID={self.__id_cliente} | "
-            f"Nombre={self.__nombre} | "
-            f"Email={self.__email} | "
-            f"Teléfono={self.__telefono}]"
-        )
-
-    def obtener_id(self) -> str:
-        return self.__id_cliente
-
-    def __repr__(self):
-        """
-        Retorna representación técnica del objeto.
-        """
-
-        return (
-            f"Cliente(id_cliente='{self.__id_cliente}', "
-            f"nombre='{self.__nombre}', "
-            f"email='{self.__email}', "
-            f"telefono='{self.__telefono}')"
-        )
-
-    def __eq__(self, other):
-        """
-        Compara clientes por ID único.
-        """
-
-        return (
-            isinstance(other, Cliente)
-            and self.__id_cliente == other.id_cliente
-        )
-
-    def __hash__(self):
-        """
-        Permite usar objetos Cliente en sets y diccionarios.
-        """
-
-        return hash(self.__id_cliente)
-
-    # ── Utilidad para pruebas ───────────────────────────────────────────────
-
-    @classmethod
-    def limpiar_registro_ids(cls):
-        """
-        Limpia el registro global de IDs.
-        Solo para pruebas.
-        """
-
-        cls._ids_registrados.clear()
+# =================================================================
+# 5. PUNTO DE ENTRADA
+# =================================================================
+if __name__ == "__main__":
+    # Iniciar motor lógico y luego la interfaz
+    gestor_logico = GestorClientes()
+    app = AppSoftwareFJ(gestor_logico)
+    app.mainloop()
